@@ -267,6 +267,7 @@ receiver.router.post(`/${fbWebhookPath}`, async (req, res) => {
 
 /* Facebook Login handler */
 receiver.router.get(`/${fbRedirectPageAccessPath}`, async (req, res) => {
+    const fbClient = createFbClient();
     let output;
     try {
         const userToken = (await fbClient.getAccessToken(req.query.code)).access_token;
@@ -275,15 +276,10 @@ receiver.router.get(`/${fbRedirectPageAccessPath}`, async (req, res) => {
         output = await fbClient.getPageAccounts(userId, userToken);
         logger.info(`Received page access tokens for user: ${userId}`);
         logger.debug('user pages: ', output);
+        res.json(output);
     } catch (e) {
         res.status(e.status ?? 500);
-        res.send(e);
-    }
-    if(output) {
-        res.json(output);
-    } else {
-        logger.info('Could not retrieve Paga Access Tokens')
-        res.send('Could not retrieve Paga Access Tokens');
+        res.send(e?.message || 'Could not retrieve Page Access Tokens');
     }
 });
 
