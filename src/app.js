@@ -266,7 +266,7 @@ receiver.router.post(`/${fbWebhookPath}`, async (req, res) => {
 })
 
 /* Facebook Login handler */
-receiver.router.get(`/${fbRedirectPageAccessUri}`, async (req, res) => {
+receiver.router.get(`/${fbRedirectPageAccessPath}`, async (req, res) => {
     let output;
     try {
         const userToken = (await fbClient.getAccessToken(req.query.code)).access_token;
