@@ -9,16 +9,16 @@ const os = require('node:os');
 const EmojiConverter = require('emoji-js');
 
 const blocks = require('./blocks.js');
-const models = require('./models.js');
-const { FbClient } = require('./fb_client.js');
-const { noThreads, noBots, onlyThreads } = require('./listener-middleware.js');
-const { fstat } = require('node:fs');
+const models = require('./models');
+const { FbClient } = require('./FbClient.js');
+const { noThreads, noBots, onlyThreads } = require('./messageFilters.js');
 
 /* Server config */
 const hostname = process.env.HOSTNAME || os.hostname();
 const port = process.env.PORT || 3000;
 
 /* Slack App config */
+const appId = process.env.APP_ID;
 const token = process.env.SLACK_BOT_TOKEN;
 const appToken = process.env.SLACK_APP_TOKEN;
 const userToken = process.env.SLACK_USER_TOKEN;
@@ -29,22 +29,27 @@ const logLevel = process.env.LOG_LEVEL || LogLevel.WARN;
 /* Facebook App config */
 const fbClientId = process.env.FB_CLIENT_ID;
 const fbClientSecret = process.env.FB_CLIENT_SECRET;
-const fbPageId = process.env.FB_PAGE_ID;
-const fbPageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
+// FB base redirect config
 const fbRedirectProtocol = process.env.FB_REDIRECT_PROTOCOL || 'https'
 const fbRedirectDomain = process.env.FB_REDIRECT_DOMAIN || `${hostname}:${port}`;
-const fbRedirectPath = process.env.FB_REDIRECT_PATH || 'fb_login_callback';
-const fbRedirectUri = `${fbRedirectProtocol}://${fbRedirectDomain}/${fbRedirectPath}`;
+const fbRedirectBaseUri = `${fbRedirectProtocol}://${fbRedirectDomain}`
+// FB login redirect config
+const fbRedirectLoginPath = process.env.FB_LOGIN_REDIRECT_PATH || 'fb_login_callback';
+const fbRedirectLoginUri = `${fbRedirectBaseUri}/${fbRedirectLoginPath}`;
+// FB page access redirect config
+const fbRedirectPageAccessPath = process.env.FB_PAGE_ACCESS_REDIRECT_PATH || 'fb_page_access_callback';
+const fbRedirectPageAccessUri = `${fbRedirectBaseUri}/${fbRedirectPageAccessPath}`;
+
 const fbWebhookPath = process.env.FB_WEBHOOK_PATH || 'fb_webhook';
 
 /* MongoDB config */
 const mongoConnectUri = process.env.MONGO_CONNECT_URI || "mongodb://localhost:27017/pizza-bot";
 
-/* Slack IDs that we fetch after initialization */
-let appId, teamId;
-
 /* Bot Config */
 const supportedFileTypes = ['jpeg', 'bmp', 'png', 'gif', 'tiff'];
+const expiredTokenErrorCodes = [190];
+const invalidTokenErrorCodes = [200]
+const tokenErrorCodes = [...expiredTokenErrorCodes, ...invalidTokenErrorCodes];
 
 /* Emoji conversion settings */
 const emoji = new EmojiConverter();
@@ -53,13 +58,13 @@ emoji.allow_caps = true;
 
 
 /* Create Fb API Client */
-const fbClient = new FbClient({
-    clientId: fbClientId ,
-    clientSecret: fbClientSecret,
-    redirectUri: fbRedirectUri,
-    pageId: fbPageId,
-    pageAccessToken: fbPageAccessToken
-});
+// const fbClient = new FbClient({
+//     clientId: fbClientId ,
+//     clientSecret: fbClientSecret,
+//     loginRedirectUri: fbRedirectLoginUri,
+//     // pageId: fbPageId,
+//     // pageAccessToken: fbPageAccessToken
+// });
 
 /* Create logger */
 const logger = new ConsoleLogger();
@@ -74,6 +79,12 @@ const receiver = new ExpressReceiver({
 receiver.router.use(bodyParser.urlencoded({ extended: false }));
 receiver.router.use(bodyParser.json());
 
+/* health check */
+receiver.router.get('/', async (req, res) => {
+    logger.info('Health Check - Status OK');
+    await res.send();
+});
+
 /* Create Slack App */
 const app = new App({
     token,
@@ -86,119 +97,133 @@ const app = new App({
 });
 
 /* Generate the home view when user clicks on Home tab */
-app.event('app_home_opened', async ({event}) => {
-    await app.client.views.publish({
-        token,
+app.event('app_home_opened', async ({client, event}) => {
+    await client.views.publish({
         user_id: event.user,
         view: blocks.homeView
     });
 });
 
-/* Intercept messages with a pizza emoji */
-app.message(noThreads, noBots, ':pizza:', async({message, say, logger}) => {
-    logger.debug(message);
-    let publishPromise;
-    let tokenValid = true;
-    const text = emoji.replace_colons(message.text); //replace Slack :emoji: tokens with Unicode
-    if(message.files) {
-        const images = await Promise.all(
-            message.files
-            .filter(file => supportedFileTypes.includes(file.filetype))
-            .map(file => axios
-                .get(file.url_private, {
-                    headers: { Authorization: `Bearer ${token}`},
-                    responseType: 'stream',
-                    decompress: true
-                }).then(({data}) => ({data, file}))
-            )
-        );
-        publishPromise = fbClient.publishPhotoPost({message: text, images});
-    } else {
-        publishPromise = fbClient.publishTextPost({message: text});
-    }
-    const publishResult = await publishPromise.catch(e => {
-        logger.error(e.response?.data);
-        if([190, 200].includes(e.response?.data?.error?.code)) // invalid token error
-            tokenValid = false;
-        else
-            throw e;
+function createFbClient({pageAccessToken, pageId} = {}) {
+    return new FbClient({
+        clientId: fbClientId,
+        clientSecret: fbClientSecret,
+        redirectLoginUri: fbRedirectLoginUri,
+        pageAccessToken,
+        pageId
     });
-    logger.debug(publishResult);
-    if(publishResult?.id) {
-        await models.Post.create({
-            slackChannelId: message.channel,
-            slackMsgId: message.ts,
-            fbPostId: publishResult.id
+}
+
+/* Bolt middleware that adds a FB API Client to the Bolt context and populates it with the team's FB Page Access Token */
+async function addFbClientToContext({context, logger, next}) {
+    const { pageAccessToken, pageId } = await models.PizzaBot.fromTeamId(context.teamId);
+    if(!pageAccessToken) logger.warn(`No page access token found for team (ID: ${context.teamId})`);
+    if(!pageId) logger.warn(`No page access token found for team (ID: ${context.teamId})`);
+    context.fbClient = createFbClient({pageAccessToken, pageId});
+    await next();
+}
+
+/* Intercept messages with a pizza emoji */
+app.message(noThreads, noBots, ':pizza:',
+    addFbClientToContext,
+    async({client, context, message, logger}) => {
+        logger.debug(message);
+        const { fbClient } = context;
+        let tokenValid = true;
+        const text = emoji.replace_colons(message.text); //replace Slack :emoji: tokens with Unicode
+        const images = message.files &&
+            await Promise.all(
+                message.files
+                .filter(file => supportedFileTypes.includes(file.filetype))
+                .map(file => axios
+                    .get(file.url_private, {
+                        headers: { Authorization: `Bearer ${token}`},
+                        responseType: 'stream',
+                        decompress: true
+                    }).then(({data}) => ({data, file}))
+                )
+            );
+        const publishResult = await fbClient.publishPost({message: text, images}).catch(e => {
+            logger.error(e.response?.data);
+            if(tokenErrorCodes.includes(e.response?.data?.error?.code)) // invalid token error
+                tokenValid = false;
+            else
+                throw e;
         });
-    }
-    if(!tokenValid) {
-        await app.client.chat.postEphemeral({
-            token,
-            channel: message.channel,
-            user: message.user,
-            text: "I couldn't post this to Facebook because the Page Access Token is either expired or does not grant enough permissions to post to the page"
-        });
-    }
+        logger.debug(publishResult);
+        if(publishResult?.id) {
+            await models.Post.create({
+                slackChannelId: message.channel,
+                slackMsgId: message.ts,
+                fbPostId: publishResult.id
+            });
+        }
+        if(!tokenValid) {
+            await client.chat.postEphemeral({
+                channel: message.channel,
+                user: message.user,
+                text: "I couldn't post this to Facebook because the Page Access Token is either expired or does not grant enough permissions to post to the page"
+            });
+        }
 });
 
 /* Intercept messages in threads */
-app.message(onlyThreads, noBots, async({message, say, logger}) => {
-    /* find parent thread */
-    logger.debug(message);
-    const parentThread = await models.Post.findOne({slackMsgId: message.thread_ts});
-    logger.debug(parentThread);
-    if(!parentThread || !parentThread.fbPostId) return;
-    // const user = await models.User.findOne({slackUserId: message.user}).exec();
-    // logger.debug(user);
-    let tokenValid = true;
-    const text = emoji.replace_colons(message.text); //replace Slack :emoji: tokens with Unicode
-    let image = null;
-    if(message.files) {
-        //facebook comments can only have one image attachment so we take the first one
+app.message(onlyThreads, noBots, 
+    addFbClientToContext,
+    async({client, context, message, logger}) => {
+        /* find parent thread */
+        logger.debug(message);
+        const { fbClient } = context;
+        const parentThread = await models.Post.findOne({slackMsgId: message.thread_ts});
+        logger.debug(parentThread);
+        if(!parentThread || !parentThread.fbPostId) return;
+        // const user = await models.User.findOne({slackUserId: message.user}).exec();
+        // logger.debug(user);
+        let tokenValid = true;
+        const text = emoji.replace_colons(message.text); //replace Slack :emoji: tokens with Unicode
+        // facebook comments can only have one image attachment so we take the first one
         const file = message.files
-            .filter(file => supportedFileTypes.includes(file.filetype))
-            [0];
-        if(file) {
-            const response = await axios.get(file.url_private, {
+            ?.filter(file => supportedFileTypes.includes(file.filetype))
+            ?.at(0);
+        // Download attached image file if it exists */
+        const image = file && {
+            file,
+            data: (await axios.get(file.url_private, {
                 headers: { Authorization: `Bearer ${token}`},
                 responseType: 'stream',
                 decompress: true
-            });
-            image = { file, data: response.data };
-        }
-    }
-    const commentResult = await fbClient.postComment({
-        postId: parentThread.fbPostId,
-        message: text,
-        image
-    }).catch(e => {
-        logger.error(e.response?.data);
-        if([190, 200].includes(e.response?.data?.error?.code)) // invalid token error
-            tokenValid = false;
-        else
-            throw e;
-    });
-    logger.debug(commentResult);
-    if(!tokenValid) {
-        await app.client.chat.postEphemeral({
-            token,
-            channel: message.channel,
-            user: message.user,
-            text: "I couldn't post this to Facebook because the Page Access Token is either expired or does not grant enough permissions to post to the page"
+            })).data
+        };
+        /* Post comment to FB */
+        const commentResult = await fbClient.postComment({
+            postId: parentThread.fbPostId,
+            message: text,
+            image
+        }).catch(e => {
+            logger.error(e.response?.data);
+            if(invalidTokenCodes.includes(e.response?.data?.error?.code)) // invalid token error
+                tokenValid = false;
+            else
+                throw e;
         });
-    }
-    // if(!tokenValid) {
-    //     await app.client.chat.postEphemeral({
-    //         token,
-    //         channel: message.channel,
-    //         user: message.user,
-    //         ...blocks.loginToFacebookPrompt({
-    //             text: "I couldn't post this to Facebook because I don't have your permission. You'll need to give me permission by clicking the login button below. After you're finished, try sending the message again.",
-    //             url: fbClient.loginDialogUrl({user: message.user})
-    //         })
-    //     });
-    // }
-    
+        logger.debug(commentResult);
+        if(!tokenValid) {
+            await client.chat.postEphemeral({
+                channel: message.channel,
+                user: message.user,
+                text: "I couldn't post this to Facebook because the Page Access Token is either expired or does not grant enough permissions to post to the page"
+            });
+        }
+        // if(!tokenValid) {
+        //     await client.chat.postEphemeral({
+        //         channel: message.channel,
+        //         user: message.user,
+        //         ...blocks.loginToFacebookPrompt({
+        //             text: "I couldn't post this to Facebook because I don't have your permission. You'll need to give me permission by clicking the login button below. After you're finished, try sending the message again.",
+        //             url: fbClient.loginDialogUrl({user: message.user})
+        //         })
+        //     });
+        // }
 });
 
 /* Facebook WebHook challenge */
@@ -241,7 +266,7 @@ receiver.router.post(`/${fbWebhookPath}`, async (req, res) => {
 })
 
 /* Facebook Login handler */
-receiver.router.get(`/${fbRedirectPath}`, async (req, res) => {
+receiver.router.get(`/${fbRedirectPageAccessUri}`, async (req, res) => {
     let output;
     try {
         const userToken = (await fbClient.getAccessToken(req.query.code)).access_token;
@@ -262,54 +287,59 @@ receiver.router.get(`/${fbRedirectPath}`, async (req, res) => {
     }
 });
 
-// receiver.router.get(`/${fbRedirectPath}`, async (req, res) => {
-//     let response, err;
-//     const { user } = JSON.parse(req.query.state);
-//     try {
-//         response = await fbClient.getAccessToken(req.query.code);
-//     } catch(e) {
-//         err = {
-//             userId: user,
-//             message: e.message,
-//             host: e.request?.host,
-//             path: e.request?.path,
-//             response: e.response?.data
-//         };
-//     }
-//     if(response?.data?.error) {
-//         err = {
-//             userId: user,
-//             host: response.request?.host,
-//             path: response.request?.path,
-//             ...response.data.error
-//         };
-//     } else if(response?.data?.access_token) {
-//         /* Update database with token info */
-//         await models.User.updateOne(
-//             {slackUserId: user},
-//             {fbAccessToken: response.data.access_token},
-//             {upsert: true}
-//         ).exec();
-//     }
-//     if(err) {
-//         logger.error(err);
-//     }
-//     await app.client.chat.postMessage({
-//         token,
-//         channel: user,
-//         text: err
-//             ? "Hmm something went wrong with granting permission to post on Facebook. Please try again or contact the app developer."
-//             : "Nice! You can now share memes to Facebook. :pizza:"
+receiver.router.get(`/${fbRedirectLoginPath}`, async (req, res) => {
+    let response, err;
+    const { user } = JSON.parse(req.query.state);
+    if(!user) {
+        logger.warn('No user ID supplied in FB login redirect');
+        return;
+    }
+    const code = req.query.code;
+    if(!code) {
+        logger.warn("No access code supplied in FB login reidrect");
+        return;
+    }
+    try {
+        response = await fbClient.getAccessToken(code);
+    } catch(e) {
+        err = {
+            userId: user,
+            message: e.message,
+            host: e.request?.host,
+            path: e.request?.path,
+            response: e.response?.data
+        };
+    }
+    if(response?.data?.error) {
+        err = {
+            userId: user,
+            host: response.request?.host,
+            path: response.request?.path,
+            ...response.data.error
+        };
+    } else if(response?.data?.access_token) {
+        /* Update database with token info */
+        await models.User.updateFbAccessToken(user, response.data.access_token);
+    }
+    if(err) {
+        logger.error(err);
+    }
+    await app.client.chat.postMessage({
+        token,
+        channel: user,
+        text: err
+            ? "Hmm something went wrong with granting permission to post on Facebook. Please try again or contact the app developer."
+            : "Nice! You can now share memes to Facebook. :pizza:"
 
-//     });
-//     res.redirect(`https://slack.com/app_redirect?app=${appId}`);
-// });
+    });
+    res.redirect(`https://slack.com/app_redirect?app=${appId}`);
+});
 
 /* Acknowledge when user clicks the facebook login button */
-// app.action('fb_login', async ({ack, body, logger}) => {
-//     logger.debug(body);
-//     await ack();
-// });
+app.action('fb_login', async ({ack, body, logger}) => {
+    logger.debug(body);
+    await ack();
+});
 
 async function start() {
     /* Start mongo */
@@ -321,19 +351,10 @@ async function start() {
     await app.init();
     await app.start(port);
     logger.info(`App listening at ${hostname}:${port}`);
-
-    /* Get App ID of our bot and Team ID of the workspace */
-    const { bot_id, team_id } = await app.client.auth.test({ token });
-    const { bot: { app_id } } = await app.client.bots.info({ token, bot: bot_id });
-
-    teamId = team_id;
-    appId = app_id;
-    logger.debug(`app_id = ${appId}`);
-    logger.debug(`team_id = ${teamId}`);
-
     await mongoPromise; //make sure Mongo finished connecting successfully
     logger.info('Pizza Bot is running! 🍕');
-    logger.info(`Facebook Login URL: ${fbClient.loginDialogUrl(appId)}`);
+    /* Get App ID of our bot */
+    logger.info(`Facebook Login URL: ${createFbClient().loginDialogUrl({state: appId, redirectUri: fbRedirectPageAccessUri})}`);
 }
 
 start();

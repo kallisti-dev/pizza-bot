@@ -8,7 +8,6 @@ module.exports.FbClient = class FbClient {
     constructor(fields) {
         this.clientId = fields.clientId;
         this.clientSecret = fields.clientSecret;
-        this.redirectUri = fields.redirectUri;
         this.pageId = fields.pageId;
         this.pageAccessToken = fields.pageAccessToken;
 
@@ -19,10 +18,10 @@ module.exports.FbClient = class FbClient {
     }
 
     /* Retrieve the URL for Facebook Login dialog */
-    loginDialogUrl(state) {
+    loginDialogUrl({redirectUri, state}) {
         return `https://www.facebook.com/v14.0/dialog/oauth?` + querystring.stringify({
             client_id: this.clientId,
-            redirect_uri: this.redirectUri,
+            redirect_uri: redirectUri,
             state: JSON.stringify(state || '')
         });
     }
@@ -83,14 +82,22 @@ module.exports.FbClient = class FbClient {
         });
     }
 
-    publishTextPost({message, accessToken}) {
+    publishPost({message, images, accessToken}) {
+        if(images) {
+            return fbClient._publishPhotoPost({message, images, accessToken});
+        } else {
+            return fbClient._publishTextPost({message, accessToken});
+        }
+    }
+
+    _publishTextPost({message, accessToken}) {
         return this.axios.post(`/${this.pageId}/feed`, {
             message,
             access_token: accessToken || this.pageAccessToken
         }).then(response => response.data);
     }
 
-    async publishPhotoPost({message, images, accessToken}) {
+    async _publishPhotoPost({message, images, accessToken}) {
         const singleImage = (images.length === 1);
         const photoResults = await Promise.all(images.map(async ({data, file}) => {
             const formData = new FormData();

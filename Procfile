@@ -1,1 +1,1 @@
-web: node src/app.ks
+web: node src/app.js

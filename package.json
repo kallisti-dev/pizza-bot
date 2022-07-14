@@ -12,13 +12,16 @@
     "form-data": "^4.0.0",
     "mongoose": "^6.4.2"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "heroku-dotenv": "^0.4.1"
+  },
   "scripts": {
     "start": "node src/app.js",
     "dev:tunnel": "ngrok http 3000",
     "fb:token:debug": "node scripts/debugToken.js",
     "fb:app:list": "node scripts/getInstalledApps.js",
-    "fb:app:subscribe": "node scripts/subscribeAppToPage.js"
+    "fb:app:subscribe": "node scripts/subscribeAppToPage.js",
+    "heroku:env:push": "npx heroku-dotenv push"
   },
   "author": "Adam Curtis",
   "license": "MIT"
