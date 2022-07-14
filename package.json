@@ -21,7 +21,7 @@
     "fb:token:debug": "node scripts/debugToken.js",
     "fb:app:list": "node scripts/getInstalledApps.js",
     "fb:app:subscribe": "node scripts/subscribeAppToPage.js",
-    "heroku:env:push": "npx heroku-dotenv push"
+    "heroku:env:push": "ENV=heroku npx heroku-dotenv push"
   },
   "author": "Adam Curtis",
   "license": "MIT"
