@@ -56,12 +56,12 @@ module.exports.FbClient = class FbClient {
     }
     
     /* Given a FB access code, retrieve an access token */
-    getAccessToken(code) {
+    getAccessToken({code, redirectUri}) {
         return this.axios.get('/oauth/access_token', {
             params: {
                 client_id: this.clientId,
                 client_secret: this.clientSecret,
-                redirect_uri: this.redirectUri,
+                redirect_uri: redirectUri,
                 code
             }
         }).then(response => response.data);

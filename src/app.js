@@ -267,19 +267,34 @@ receiver.router.post(`/${fbWebhookPath}`, async (req, res) => {
 
 /* Facebook Login handler */
 receiver.router.get(`/${fbRedirectPageAccessPath}`, async (req, res) => {
+    if(req.query.error) {
+        logger.error(req.query);
+        res.redirect(`https://slack.com/app_redirect?app=${appId}`);
+        return;
+    }
+    const code = req.query.code;
+    if(!code) {
+        logger.warn("No access code supplied in FB login reidrect");
+        return;
+    }
     const fbClient = createFbClient();
     let output;
     try {
-        const userToken = (await fbClient.getAccessToken(req.query.code)).access_token;
-        const appToken = (await fbClient.getAppAccessToken()).access_token;
+        
+        const userToken = (await fbClient.getAccessToken({code, redirectUri: fbRedirectPageAccessUri})).access_token;
+        const appToken = `${fbClientId}|${fbClientSecret}`;
         const userId = (await fbClient.debugToken(appToken, userToken)).user_id;
         output = await fbClient.getPageAccounts(userId, userToken);
-        logger.info(`Received page access tokens for user: ${userId}`);
+        logger.info(`Retrieved page access tokens for user: ${userId}`);
         logger.debug('user pages: ', output);
         res.json(output);
     } catch (e) {
         res.status(e.status ?? 500);
         res.send(e?.message || 'Could not retrieve Page Access Tokens');
+        logger.error({
+            path: e?.request?.path,
+            error: e?.response?.data
+        });
     }
 });
 
