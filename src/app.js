@@ -1,3 +1,4 @@
+'use strict';
 require('dotenv').config()
 
 const { App, ExpressReceiver, LogLevel } = require('@slack/bolt');
@@ -11,24 +12,29 @@ const EmojiConverter = require('emoji-js');
 const blocks = require('./blocks.js');
 const models = require('./models');
 const { FbClient } = require('./FbClient.js');
-const { noThreads, noBots, onlyThreads } = require('./messageFilters.js');
+const { noThreads, noBots, onlyThreads, requireFbPageAccess } = require('./messageFilters.js');
+
+const fatal = msg => {
+    console.log(`ERROR: msg`);
+    process.exit(1);
+}
 
 /* Server config */
 const hostname = process.env.HOSTNAME || os.hostname();
 const port = process.env.PORT || 3000;
 
 /* Slack App config */
-const appId = process.env.APP_ID;
-const token = process.env.SLACK_BOT_TOKEN;
-const appToken = process.env.SLACK_APP_TOKEN;
+const appId = process.env.SLACK_APP_ID || fatal('No SLACK_APP_ID environment variable');
+const token = process.env.SLACK_BOT_TOKEN || fatal("No SLACK_BOT_TOKEN environment variable");
+const appToken = process.env.SLACK_APP_TOKEN || fatal("No SLACK_APP_TOKEN environment variable");
 const userToken = process.env.SLACK_USER_TOKEN;
-const signingSecret = process.env.SLACK_SIGNING_SECRET;
+const signingSecret = process.env.SLACK_SIGNING_SECRET || fatal("No SLACK_SIGNING_SECRET environment variable");
 const socketMode = ['true', '1', 'yes'].includes((process.env.SLACK_SOCKET_MODE || '').toLowerCase());
 const logLevel = process.env.LOG_LEVEL || LogLevel.WARN;
 
 /* Facebook App config */
-const fbClientId = process.env.FB_CLIENT_ID;
-const fbClientSecret = process.env.FB_CLIENT_SECRET;
+const fbClientId = process.env.FB_CLIENT_ID || fatal("no FB_CLIENT_ID environment variable");
+const fbClientSecret = process.env.FB_CLIENT_SECRET || fatal("no FB_CLIENT_SECRET environment variable");
 // FB base redirect config
 const fbRedirectProtocol = process.env.FB_REDIRECT_PROTOCOL || 'https'
 const fbRedirectDomain = process.env.FB_REDIRECT_DOMAIN || `${hostname}:${port}`;
@@ -48,23 +54,13 @@ const mongoConnectUri = process.env.MONGO_CONNECT_URI || "mongodb://localhost:27
 /* Bot Config */
 const supportedFileTypes = ['jpeg', 'bmp', 'png', 'gif', 'tiff'];
 const expiredTokenErrorCodes = [190];
-const invalidTokenErrorCodes = [200]
+const invalidTokenErrorCodes = [100, 200]
 const tokenErrorCodes = [...expiredTokenErrorCodes, ...invalidTokenErrorCodes];
 
 /* Emoji conversion settings */
 const emoji = new EmojiConverter();
 emoji.replace_mode = 'unified';
 emoji.allow_caps = true;
-
-
-/* Create Fb API Client */
-// const fbClient = new FbClient({
-//     clientId: fbClientId ,
-//     clientSecret: fbClientSecret,
-//     loginRedirectUri: fbRedirectLoginUri,
-//     // pageId: fbPageId,
-//     // pageAccessToken: fbPageAccessToken
-// });
 
 /* Create logger */
 const logger = new ConsoleLogger();
@@ -78,14 +74,13 @@ const receiver = new ExpressReceiver({
 /* Install body-parser middleware for the Express router */ 
 receiver.router.use(bodyParser.urlencoded({ extended: false }));
 receiver.router.use(bodyParser.json());
-
-/* health check */
-receiver.router.get('/', async (req, res) => {
+/* Health check endpoint */
+receiver.router.get('/', (req, res) => {
     logger.info('Health Check - Status OK');
-    await res.send();
+    res.send();
 });
 
-/* Create Slack App */
+/* Create Bolt App */
 const app = new App({
     token,
     appToken,
@@ -96,23 +91,28 @@ const app = new App({
     logLevel
 });
 
-/* Generate the home view when user clicks on Home tab */
-app.event('app_home_opened', async ({client, event}) => {
-    await client.views.publish({
-        user_id: event.user,
-        view: blocks.homeView
-    });
-});
-
+//Helper to create a FbClient from environment config
 function createFbClient({pageAccessToken, pageId} = {}) {
     return new FbClient({
         clientId: fbClientId,
         clientSecret: fbClientSecret,
-        redirectLoginUri: fbRedirectLoginUri,
         pageAccessToken,
         pageId
     });
 }
+
+/* Generate the home view when user clicks on Home tab */
+app.event('app_home_opened', async ({client, event}) => {
+    await client.views.publish({
+        user_id: event.user,
+        view: blocks.homeView({
+            fbLoginUrl: createFbClient().loginDialogUrl({
+                state: {user: event.user},
+                redirectUri: fbRedirectLoginUri
+            })
+        })
+    });
+});
 
 /* Bolt middleware that adds a FB API Client to the Bolt context and populates it with the team's FB Page Access Token */
 async function addFbClientToContext({context, logger, next}) {
@@ -126,6 +126,7 @@ async function addFbClientToContext({context, logger, next}) {
 /* Intercept messages with a pizza emoji */
 app.message(noThreads, noBots, ':pizza:',
     addFbClientToContext,
+    requireFbPageAccess,
     async({client, context, message, logger}) => {
         logger.debug(message);
         const { fbClient } = context;
@@ -170,6 +171,7 @@ app.message(noThreads, noBots, ':pizza:',
 /* Intercept messages in threads */
 app.message(onlyThreads, noBots, 
     addFbClientToContext,
+    requireFbPageAccess,
     async({client, context, message, logger}) => {
         /* find parent thread */
         logger.debug(message);
@@ -269,13 +271,14 @@ receiver.router.post(`/${fbWebhookPath}`, async (req, res) => {
 receiver.router.get(`/${fbRedirectPageAccessPath}`, async (req, res) => {
     if(req.query.error) {
         logger.error(req.query);
+        //TODO capture user ID in state to send message in slack
         res.redirect(`https://slack.com/app_redirect?app=${appId}`);
         return;
     }
     const code = req.query.code;
     if(!code) {
         logger.warn("No access code supplied in FB login reidrect");
-        return;
+        return res.status(400).send();
     }
     const fbClient = createFbClient();
     let output;
@@ -289,8 +292,8 @@ receiver.router.get(`/${fbRedirectPageAccessPath}`, async (req, res) => {
         logger.debug('user pages: ', output);
         res.json(output);
     } catch (e) {
-        res.status(e.status ?? 500);
-        res.send(e?.message || 'Could not retrieve Page Access Tokens');
+        res.status(e.status ?? 500)
+            .send(e?.message || 'Could not retrieve Page Access Tokens');
         logger.error({
             path: e?.request?.path,
             error: e?.response?.data
@@ -303,15 +306,16 @@ receiver.router.get(`/${fbRedirectLoginPath}`, async (req, res) => {
     const { user } = JSON.parse(req.query.state);
     if(!user) {
         logger.warn('No user ID supplied in FB login redirect');
-        return;
+        return res.status(400).send();
     }
     const code = req.query.code;
     if(!code) {
         logger.warn("No access code supplied in FB login reidrect");
-        return;
+        return res.status(400).send();
     }
+    const fbClient = createFbClient();
     try {
-        response = await fbClient.getAccessToken(code);
+        response = await fbClient.getAccessToken({code, redirectUri: fbRedirectLoginUri});
     } catch(e) {
         err = {
             userId: user,
@@ -348,7 +352,7 @@ receiver.router.get(`/${fbRedirectLoginPath}`, async (req, res) => {
 
 /* Acknowledge when user clicks the facebook login button */
 app.action('fb_login', async ({ack, body, logger}) => {
-    logger.debug(body);
+    // logger.debug(body);
     await ack();
 });
 

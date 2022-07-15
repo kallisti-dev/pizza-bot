@@ -9,7 +9,7 @@ const PizzaBotSchema = new mongoose.Schema({
     pageId: String
 });
 
-PizzaBotSchema.statics.updatePageAccessToken = (teamId, pageAccessToken, pageId) => {
+PizzaBotSchema.statics.updatePageAccessToken = function (teamId, pageAccessToken, pageId) {
     return this.updateOne(
         teamId,
         { pageAccessToken, pageId },
@@ -17,8 +17,9 @@ PizzaBotSchema.statics.updatePageAccessToken = (teamId, pageAccessToken, pageId)
     );
 };
 
-PizzaBotSchema.statics.fromTeamId = async (teamId) => {
-    return this.model.findOne({teamId});
+PizzaBotSchema.statics.fromTeamId = async function (teamId) {
+    return await this.findOne({ teamId })
+        ?? await this.create({ teamId })
 }
 
 const PizzaBot = mongoose.model("PizzaBot", PizzaBotSchema);

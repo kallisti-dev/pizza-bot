@@ -16,8 +16,8 @@ const UserSchema = new mongoose.Schema({
 });
 
 
-UserSchema.statics.updateFbAccessToken = async (slackUserId, token) => {
-    return this.model.updateOne(
+UserSchema.statics.updateFbAccessToken = async function (slackUserId, token) {
+    return this.updateOne(
         { slackUserId },
         { $set: {
             'fbAccess.token': token,

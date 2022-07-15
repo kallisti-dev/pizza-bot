@@ -84,9 +84,9 @@ module.exports.FbClient = class FbClient {
 
     publishPost({message, images, accessToken}) {
         if(images) {
-            return fbClient._publishPhotoPost({message, images, accessToken});
+            return this._publishPhotoPost({message, images, accessToken});
         } else {
-            return fbClient._publishTextPost({message, accessToken});
+            return this._publishTextPost({message, accessToken});
         }
     }
 

@@ -1,20 +1,20 @@
 /* A module containing all the Views and Blocks for Slack messages */ 
 
 
-// const fbLoginButton = fbLoginUrl => (
-//     {
-//         "type": "button",
-//         "text": {
-//             "type": "plain_text",
-//             "text": "Login to Facebook"
-//         },
-//         "style": "primary",
-//         "action_id": "fb_login",
-//         "url": fbLoginUrl
-//     }
-// );
+const fbLoginButton = fbLoginUrl => (
+    {
+        "type": "button",
+        "text": {
+            "type": "plain_text",
+            "text": "Login to Facebook"
+        },
+        "style": "primary",
+        "action_id": "fb_login",
+        "url": fbLoginUrl
+    }
+);
 
-module.exports.homeView = {
+module.exports.homeView = ({fbLoginUrl}) => ({
     "type": "home",
     "blocks": [
         {
@@ -32,9 +32,13 @@ module.exports.homeView = {
                 "emoji": true,
                 "text": "A simple bot that post memes to a Facebook page when a message contains the :pizza: emoji"
             }
+        },
+        {
+            "type": "actions",
+            "elements": [fbLoginButton(fbLoginUrl)]
         }
     ]
-};
+});
 
 /* Dialog to prompt the user to login to facebook */
 module.exports.loginToFacebookPrompt = ({text, url}) => (
