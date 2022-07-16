@@ -26,21 +26,21 @@ env_variables:
   FB_CLIENT_SECRET:
   SLACK_SOCKET_MODE: false
   PORT: 3000
-  LOG_LEVEL: info
+  LOG_LEVEL: warn
   BASE_REDIRECT_DOMAIN:
   MONGO_CONNECT_URI:
 
-
 liveness_check:
   path: "/health"
-  check_interval_sec: 15
+  check_interval_sec: 60
   timeout_sec: 4
-  failure_threshold: 4
-  success_threshold: 2
+  failure_threshold: 2
+  success_threshold: 1
 
 readiness_check:
   path: "/health"
-  check_interval_sec: 5
+  check_interval_sec: 10
   timeout_sec: 4
   failure_threshold: 4
-  success_threshold: 2
+  success_threshold: 1
+
