@@ -32,14 +32,14 @@ env_variables:
 
 
 liveness_check:
-  path: "/"
+  path: "/health"
   check_interval_sec: 15
   timeout_sec: 4
   failure_threshold: 4
   success_threshold: 2
 
 readiness_check:
-  path: "/"
+  path: "/health"
   check_interval_sec: 5
   timeout_sec: 4
   failure_threshold: 4
