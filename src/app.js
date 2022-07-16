@@ -3,6 +3,7 @@ require('dotenv').config()
 
 const { App, ExpressReceiver, LogLevel } = require('@slack/bolt');
 const { ConsoleLogger } = require('@slack/logger');
+const express = require('express');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const axios = require('axios');
@@ -36,7 +37,7 @@ const signingSecret = process.env.SLACK_SIGNING_SECRET || fatal("No SLACK_SIGNIN
 const socketMode = ['true', '1', 'yes'].includes((process.env.SLACK_SOCKET_MODE || '').toLowerCase());
 const logLevel = process.env.LOG_LEVEL || LogLevel.WARN;
 const slackScopes = ["channels:history", "chat:write", "chat:write.customize", "files:read", "files:write", "groups:history", "im:history", "im:write", "mpim:history", "users:read"];
-const pizzaTimeImgPath = 'data/pizza-time.jpeg';
+const pizzaTimeImgPath = 'public/images/pizza-time.jpeg';
 
 /* MongoDB config */
 const mongoConnectUri = process.env.MONGO_CONNECT_URI || "mongodb://localhost:27017/pizza-bot";
@@ -478,6 +479,9 @@ receiver.router.get('/health', async (req, res) => {
         res.status(503).json(status);
     }
 });
+
+/* Configure static content middleware */
+receiver.router.use(express.static('public'));
 
 async function start() {
     /* Start mongo */
