@@ -37,7 +37,7 @@ const signingSecret = process.env.SLACK_SIGNING_SECRET || fatal("No SLACK_SIGNIN
 const socketMode = ['true', '1', 'yes'].includes((process.env.SLACK_SOCKET_MODE || '').toLowerCase());
 const logLevel = process.env.LOG_LEVEL || LogLevel.WARN;
 const slackScopes = ["channels:history", "chat:write", "chat:write.customize", "files:read", "files:write", "groups:history", "im:history", "im:write", "mpim:history", "users:read"];
-const pizzaTimeImgPath = 'public/images/pizza-time.jpeg';
+const pizzaTimeImgPath = 'data/pizza-time.jpeg';
 
 /* MongoDB config */
 const mongoConnectUri = process.env.MONGO_CONNECT_URI || "mongodb://localhost:27017/pizza-bot";
@@ -485,9 +485,9 @@ receiver.router.use(express.static('public'));
 
 async function start() {
     /* Start mongo */
-    logger.info(`connecting to ${mongoConnectUri} ...`);
+    logger.info(`connecting to mongo ...`);
     const mongoPromise = mongoose.connect(mongoConnectUri)
-        .then(() => logger.info(`Connected to ${mongoConnectUri}`));
+        .then(() => logger.info(`Connected to mongo`));
     /* Start Slack client */
     logger.info(`starting app server at ${hostname}:${port} ...`)
     await app.init();
