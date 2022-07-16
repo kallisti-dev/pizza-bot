@@ -17,13 +17,19 @@ module.exports.FbClient = class FbClient {
         });
     }
 
+    usePage(pageId, pageAccessToken) {
+        this.pageId = pageId;
+        this.pageAccessToken = pageAccessToken;
+    }
+
     /* Retrieve the URL for Facebook Login dialog */
-    loginDialogUrl({redirectUri, state}) {
-        return `https://www.facebook.com/v14.0/dialog/oauth?` + querystring.stringify({
+    loginDialogUrl({user, teamId, redirectUri, state, scope}) {
+        return `https://www.facebook.com/v14.0/dialog/oauth?${querystring.stringify({
             client_id: this.clientId,
             redirect_uri: redirectUri,
-            state: JSON.stringify(state || '')
-        });
+            state: JSON.stringify(state || ''),
+            scope
+        })}`;
     }
 
     getAppAccessToken() {

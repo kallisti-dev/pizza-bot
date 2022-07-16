@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Slack bot to integrate with Facebook page",
   "main": "src/app.js",
+  "engines": {
+    "node": "^16.0.0"
+  },
   "dependencies": {
     "@slack/bolt": "^3.11.3",
     "axios": "^0.27.2",
@@ -13,10 +16,11 @@
     "mongoose": "^6.4.2"
   },
   "devDependencies": {
-    "heroku-dotenv": "^0.4.1"
+    "axios-debug-log": "^0.8.4"
   },
   "scripts": {
     "start": "node src/app.js",
+    "start:debug:axios": "node --require axios-debug-log/enable src/app.js",
     "dev:tunnel": "ngrok http 3000",
     "fb:token:debug": "node scripts/debugToken.js",
     "fb:app:list": "node scripts/getInstalledApps.js",

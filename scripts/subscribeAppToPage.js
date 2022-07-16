@@ -3,12 +3,13 @@ const { FbClient } = require('../src/fb_client.js');
 const axios = require('axios');
 
 async function run() {
-    const { FB_CLIENT_ID, FB_CLIENT_SECRET, FB_PAGE_ID, FB_PAGE_ACCESS_TOKEN} = process.env;
+    const [pageId, pageAccessToken] = process.argv.splice(2);
+    const { FB_CLIENT_ID, FB_CLIENT_SECRET } = process.env;
     const fbClient = new FbClient({
         clientId: FB_CLIENT_ID,
         clientSecret: FB_CLIENT_SECRET,
-        pageId: FB_PAGE_ID,
-        pageAccessToken: FB_PAGE_ACCESS_TOKEN
+        pageId,
+        pageAccessToken
     });
     const response = await fbClient.subscribeAppToPage();
     console.log(response.data ?? response);
