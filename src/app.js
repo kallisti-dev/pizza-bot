@@ -62,6 +62,9 @@ const fbWebhookPath = process.env.FB_WEBHOOK_PATH || 'fb_webhook';
 const baseRedirectProtocol = process.env.BASE_REDIRECT_PROTOCOL || 'https'
 const baseRedirectDomain = process.env.BASE_REDIRECT_DOMAIN || `${hostname}:${port}`;
 const baseRedirectUri = `${baseRedirectProtocol}://${baseRedirectDomain}`
+/* Slack Redirects */
+const slackRedirectPath = `/slack/oauth_redirect`
+const slackRedirectUri = `${baseRedirectUri}${slackRedirectPath}`;
 /* Facebook Redirects */
 const fbRedirectLoginPath = process.env.FB_REDIRECT_LOGIN_PATH || 'fb_login_callback';
 const fbRedirectLoginUri = `${baseRedirectUri}/${fbRedirectLoginPath}`;
@@ -86,8 +89,10 @@ const receiver = new ExpressReceiver({
     clientSecret: slackClientSecret,
     stateSecret,
     scopes: slackScopes,
+    redirectUri: slackRedirectUri,
     installerOptions: {
         directInstall: true,
+        redirectUriPath: slackRedirectPath,
         /* after slack installation, redirect to facebook login */
         callbackOptions: {
             success: (installation, installOptions, req, res) => {
@@ -112,11 +117,6 @@ const receiver = new ExpressReceiver({
 /* Install body-parser middleware for the Express router */ 
 receiver.router.use(bodyParser.urlencoded({ extended: false }));
 receiver.router.use(bodyParser.json());
-/* Health check endpoint */
-receiver.router.get('/', (req, res) => {
-    logger.info('health check - status ok');
-    res.send();
-});
 
 /* Create Bolt App */
 const app = new App({
@@ -462,6 +462,22 @@ receiver.router.post(`/${fbWebhookPath}`, async (req, res) => {
 app.action('fb_login', async ({ack, body, logger}) => {
     // logger.debug(body);
     await ack();
+});
+
+/* Health check endpoint */
+receiver.router.post('/health', async (req, res) => {
+    const status = {
+        db: mongoose.connection.readyState === mongoose.STATES.connected,
+        slack: (await app.client.api.test()).ok,
+    };
+    if(status.db && status.slack) {
+        logger.info('health check =', status);
+        res.json(status);
+    } else {
+        logger.warn('health check = ', status);
+        res.status(503).json(status);
+    }
+    
 });
 
 async function start() {
