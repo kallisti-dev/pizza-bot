@@ -1,0 +1,46 @@
+# GCP App Engine app.yaml configuration 
+runtime: nodejs16
+#env: flex
+
+# This sample incurs costs to run on the App Engine flexible environment.
+# The settings below are to reduce costs during testing and are not appropriate
+# for production use. For more information, see:
+# https://cloud.google.com/appengine/docs/flexible/nodejs/configuring-your-app-with-app-yaml
+manual_scaling:
+  instances: 1
+resources:
+  cpu: 1
+  memory_gb: 1
+  disk_size_gb: 10
+
+### PUT SECRET ENVIRONMENT VARIABLES HERE ###
+env_variables:
+  SLACK_APP_ID:
+  SLACK_CLIENT_ID:
+  SLACK_CLIENT_SECRET:
+  SLACK_SIGNING_SECRET:
+  SLACK_BOT_TOKEN:
+  SLACK_APP_TOKEN:
+  SLACK_USER_TOKEN:
+  FB_CLIENT_ID:
+  FB_CLIENT_SECRET:
+  SLACK_SOCKET_MODE: false
+  PORT: 3000
+  LOG_LEVEL: info
+  BASE_REDIRECT_DOMAIN:
+  MONGO_CONNECT_URI:
+
+
+liveness_check:
+  path: "/"
+  check_interval_sec: 15
+  timeout_sec: 4
+  failure_threshold: 4
+  success_threshold: 2
+
+readiness_check:
+  path: "/"
+  check_interval_sec: 5
+  timeout_sec: 4
+  failure_threshold: 4
+  success_threshold: 2
