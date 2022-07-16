@@ -19,7 +19,6 @@ module.exports.onlyThreads = async ({message, next}) => {
 
 /* Requires that a FB client is initialized in the context with valid page ID and page access token */
 module.exports.requireFbPageAccess = async ({context, next}) => {
-    console.log(context);
     const { fbClient } = context;
     if(fbClient && fbClient.pageId && fbClient.pageAccessToken) {
         await next()

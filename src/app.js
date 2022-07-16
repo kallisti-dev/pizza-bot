@@ -415,7 +415,7 @@ app.message(onlyThreads, noBots,
 
 /* Facebook WebHook challenge */
 receiver.router.get(`/${fbWebhookPath}`, async (req, res) => {
-    console.log(req.query);
+    logger.info(`/${fbWebookPath}`, req.query);
     res.send(req.query['hub.challenge']);
 });
 
@@ -465,7 +465,7 @@ app.action('fb_login', async ({ack, body, logger}) => {
 });
 
 /* Health check endpoint */
-receiver.router.post('/health', async (req, res) => {
+receiver.router.get('/health', async (req, res) => {
     const status = {
         db: mongoose.connection.readyState === mongoose.STATES.connected,
         slack: (await app.client.api.test()).ok,
@@ -477,7 +477,6 @@ receiver.router.post('/health', async (req, res) => {
         logger.warn('health check = ', status);
         res.status(503).json(status);
     }
-    
 });
 
 async function start() {
